@@ -10,12 +10,8 @@ app.use(express.json());
 
 const pool = new Pool({
     connectionString: process.env.POSTGRES_URL,
-  })
+});
 
-app.use((req, res, next) => {
-    req.pool = pool;
-    next();
-})
 console.log('Connecting to PostgreSQL');
 
 pool.connect()
@@ -23,35 +19,37 @@ pool.connect()
     .catch(err => console.error('PostgreSQL error:', err));
 
 app.use((req, res, next) => {
-        req.pool = pool;
-        next();
-    })
+    req.pool = pool;
+    next();
+});
 
+app.use('/api/users', userRoutes);
 
 app.use('/', (req, res) => {
-    res.json({ message: 'Hello, world!'})
-})
-app.use('/api/users', userRoutes)
+    res.json({ message: 'Hello, world!' });
+});
 
-const PORT = process.env.PORT;
-const server = app.listen(PORT, () => console.log(`Listening on port ${PORT}`));
+const PORT = process.env.PORT || 3330; // Provide a default port
+const server = app.listen(PORT, () => {
+    console.log(`Listening on port ${PORT}`);
+});
 
 process.on('SIGTERM', () => {
-    console.log('SIGTERM signal received: closing HTTP server')
+    console.log('SIGTERM signal received: closing HTTP server');
     server.close(() => {
-        console.log('HTTP server closed')
+        console.log('HTTP server closed');
         pool.end(() => {
-            console.log('PostgreSQL pool has ended')
+            console.log('PostgreSQL pool has ended');
         });
     });
 });
 
 process.on('SIGINT', () => {
-    console.log('SIGINT signal received: closing HTTP server')
+    console.log('SIGINT signal received: closing HTTP server');
     server.close(() => {
-        console.log('HTTP server closed')
+        console.log('HTTP server closed');
         pool.end(() => {
-            console.log('PostgreSQL pool has ended')
+            console.log('PostgreSQL pool has ended');
         });
     });
 });
