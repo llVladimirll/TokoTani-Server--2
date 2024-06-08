@@ -23,9 +23,6 @@ pool.connect()
     .then(() => console.log('Connected to PostgreSQL'))
     .catch(err => console.error('PostgreSQL error:', err));
 
-app.use('/', (req, res, next) => {
-    res.json({message: 'hello world'});
-});
 app.use('/api/users', userRoutes);
 
 const PORT = process.env.PORT || 3330; // Default port 3000 if PORT is not provided
