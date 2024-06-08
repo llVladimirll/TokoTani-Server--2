@@ -23,7 +23,7 @@ pool.connect()
     .then(() => console.log('Connected to PostgreSQL'))
     .catch(err => console.error('PostgreSQL error:', err));
 
-app.use('/', (req, res) => {
+app.use('/', (req, res, next) => {
     res.json({message: 'hello world'});
 });
 app.use('/api/users', userRoutes);
