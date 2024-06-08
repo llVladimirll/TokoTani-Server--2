@@ -31,6 +31,9 @@ app.use((req, res, next) => {
         next();
     })
 
+app.use('/', (req, res) => {
+    res.json({message: 'hello world'});
+})
 app.use('/api/users', userRoutes)
 
 const PORT = process.env.PORT;
