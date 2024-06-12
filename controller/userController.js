@@ -22,14 +22,14 @@ const register = async (req, res, pool) => {
 const login = async (req, res, pool) => {
   const {email, password} = req.body;
   try {
-    const result = await pool.query(
+    const userResult = await pool.query(
       'SELECT * FROM users WHERE email = $1', [email]
     );
-    if (result.rows.length === 0){
+    if (userResult.rows.length === 0){
       return res.status(401).json({ message: 'Invalid username or password' });
     }
 
-    const user = result.rows[0];
+    const user = userResult.rows[0];
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if(!isPasswordValid){
@@ -37,10 +37,16 @@ const login = async (req, res, pool) => {
     }
 
     const userToken = jwt.sign({userID : user.id, isseller : user.isSeller }, process.env.JWT_SECRET, { expiresIn: '12h'});
-    res.status(200).json({ token: userToken});
+    
+    if(user.isSeller){
+      const sellerResult = await pool.query('SELECT * FROM seller WHERE user_id = $1', [user.id]);
+      const seller = sellerResult.rows[0];
 
-    if(isSeller){
-      const sellerToken = jwt.sign({})
+      const sellerToken = jwt.sign({SellerID: seller.id }, process.env.JWT_SECRET, { expiresIn: '24h'});
+
+      res.status(200).json({ userToken: userToken, sellerToken: sellerToken});
+    }else{
+      res.status(200).json({ userToken: userToken});
     }
 
   } catch (err) {
