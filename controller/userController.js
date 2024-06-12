@@ -9,7 +9,8 @@ const register = async (req, res, pool) => {
     try{
         const hashedPassword = await bcrypt.hash(password, 10);
         await pool.query(
-            'INSERT INTO users (name, email, password) VALUES ($1, $2, $3)',[name, email, hashedPassword]
+          'INSERT INTO users (name, email, password, isseller, created_at) VALUES ($1, $2, $3, $4, NOW())', [name, email, hashedPassword, false]
+
         );
         res.status(201).json({message: 'User Registered Successfully'});
       }catch(err){
@@ -35,8 +36,12 @@ const login = async (req, res, pool) => {
       return res.status(401).json({ message: 'Invalid username or password' });
     }
 
-    const token = jwt.sign({userID : user.id }, process.env.JWT_SECRET, { expiresIn: '12h'});
-    res.status(200).json({ token: token});
+    const userToken = jwt.sign({userID : user.id, isseller : user.isSeller }, process.env.JWT_SECRET, { expiresIn: '12h'});
+    res.status(200).json({ token: userToken});
+
+    if(isSeller){
+      const sellerToken = jwt.sign({})
+    }
 
   } catch (err) {
     console.error(err);
