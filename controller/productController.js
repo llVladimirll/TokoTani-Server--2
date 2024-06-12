@@ -2,42 +2,35 @@ const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const cloudinary = require('../config/cloudinary');
+const sharp = require('sharp');
 
-const uploadDir = 'uploads/product/';
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
 
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, uploadDir);
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'uploads/products', // specify the folder in your Cloudinary account
+        format: 'jpg', // supports promises as well
     },
-    filename: function (req, file, cb) {
-        const uniqueName = uuidv4() + path.extname(file.originalname);
-        cb(null, uniqueName);
-    }
 });
 
   const upload = multer({ storage: storage });
 
   const postProduct = async (req, res, pool) => {
-    
     const { name, price, description, sellerID } = req.body;
 
     if (!req.file) {
         return res.status(400).json({ message: 'No file uploaded' });
     }
-    
+
     const picturePath = req.file.path;
+    const publicId = req.file.filename;
 
     try {
-        // Resize image
-        await sharp(picturePath)
-            .resize({ width: 500 }) // Adjust the width as needed
-            .toFile(picturePath);
-
         await pool.query(
-            'INSERT INTO products (name, price, description, created_at, picture_path, seller_id) VALUES ($1, $2, $3, NOW(), $4, $5)', [name, price, description, picturePath, sellerID]
+            'INSERT INTO products (name, price, description, created_at, picture_path, seller_id) VALUES ($1, $2, $3, NOW(), $4, $5)',
+            [name, price, description, picturePath, sellerID]
         );
         res.status(201).json({ message: 'Product added successfully' });
     } catch (error) {
@@ -49,24 +42,22 @@ const storage = multer.diskStorage({
 
 
 
-const getAllProductData = async (req, res) => {
+const getAllProductData = async (req, res, pool) => {
+    const { page = 1, limit = 4 } = req.query;
     try {
-        const result = await req.pool.query('SELECT id, name, price, description, picture_path FROM products');
-        const products = await Promise.all(result.rows.map(async (product) => {
-            const imagePath = path.join(__dirname, '..', product.picture_path);
-            const imageBuffer = await fs.promises.readFile(imagePath);
-            const base64Image = imageBuffer.toString('base64');
-            const imageUrl = `data:image/jpeg;base64,${base64Image}`;
-            
-            return {
-                id: product.id,
-                name: product.name,
-                price: product.price,
-                description: product.description,
-                image_url: imageUrl
-            };
+        const offset = (page - 1) * limit;
+        const result = await req.pool.query('SELECT COUNT(*) AS total FROM products'); // Query to get total count
+        const totalItems = parseInt(result.rows[0].total); // Extract total count from the result
+        const totalPages = Math.ceil(totalItems / limit); // Calculate total pages
+        const productResult = await req.pool.query('SELECT id, name, price, description, picture_path FROM products ORDER BY id LIMIT $1 OFFSET $2', [limit, offset]);
+        const products = productResult.rows.map(product => ({
+            id: product.id,
+            name: product.name,
+            price: product.price,
+            description: product.description,
+            image_url: cloudinary.url(product.picture_path) // Get the URL from Cloudinary
         }));
-        res.json(products);
+        res.json({ products, totalPages }); // Send both products and totalPages in the response
     } catch (error) {
         console.error('Error fetching products:', error);
         res.status(500).json({ message: 'Internal server error' });
