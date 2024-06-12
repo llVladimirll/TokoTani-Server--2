@@ -3,6 +3,7 @@ const { Pool } = require('pg');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const userRoutes = require('./routes/userRoutes');
+const productRoutes = require('./routes/productRoutes');
 
 dotenv.config();
 
@@ -28,7 +29,11 @@ pool.connect()
     .then(() => console.log('Connected to PostgreSQL'))
     .catch(err => console.error('PostgreSQL error:', err));
 
+
+app.use('/uploads', express.static('uploads'));
+
 app.use('/api/users', userRoutes);
+app.use('/api/products', productRoutes)
 
 const PORT = process.env.PORT || 3330; // Default port 3000 if PORT is not provided
 const server = app.listen(PORT, () => console.log(`Listening on port ${PORT}`));
