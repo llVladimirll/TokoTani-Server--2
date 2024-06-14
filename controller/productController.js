@@ -1,11 +1,6 @@
 const multer = require('multer');
-const fs = require('fs');
-const path = require('path');
-const { v4: uuidv4 } = require('uuid');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('../config/cloudinary');
-const sharp = require('sharp');
-
 
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
@@ -15,10 +10,10 @@ const storage = new CloudinaryStorage({
     },
 });
 
-  const upload = multer({ storage: storage });
+const upload = multer({ storage: storage });
 
-  const postProduct = async (req, res, pool) => {
-    const { name, price, description, sellerID } = req.body;
+const postProduct = async (req, res, pool) => {
+    const { name, price, description, sellerID, categoryName } = req.body;
 
     if (!req.file) {
         return res.status(400).json({ message: 'No file uploaded' });
@@ -28,10 +23,24 @@ const storage = new CloudinaryStorage({
     const publicId = req.file.filename;
 
     try {
-        await pool.query(
-            'INSERT INTO products (name, price, description, created_at, picture_path, seller_id) VALUES ($1, $2, $3, NOW(), $4, $5)',
-            [name, price, description, picturePath, sellerID]
+        // Get category_id from the category name
+        const categoryResult = await pool.query(
+            'SELECT id FROM categories WHERE name = $1',
+            [categoryName]
         );
+
+        if (categoryResult.rows.length === 0) {
+            return res.status(404).json({ message: 'Category not found' });
+        }
+
+        const categoryId = categoryResult.rows[0].id;
+
+        // Insert product with category_id
+        await pool.query(
+            'INSERT INTO products (name, price, description, created_at, picture_path, seller_id, category_id) VALUES ($1, $2, $3, NOW(), $4, $5, $6)',
+            [name, price, description, picturePath, sellerID, categoryId]
+        );
+
         res.status(201).json({ message: 'Product added successfully' });
     } catch (error) {
         console.error('Error inserting product:', error);
@@ -39,38 +48,75 @@ const storage = new CloudinaryStorage({
     }
 };
 
-
-
-
-const getAllProductData = async (req, res, pool) => {
-    const { page = 1, limit = 4 } = req.query;
+const getAllProductData = async (req, res) => {
+    const { page = 1, limit = 9, category } = req.query;
+  
     try {
-        const offset = (page - 1) * limit;
-        const result = await req.pool.query('SELECT COUNT(*) AS total FROM products'); // Query to get total count
-        const totalItems = parseInt(result.rows[0].total); // Extract total count from the result
-        const totalPages = Math.ceil(totalItems / limit); // Calculate total pages
-        const productResult = await req.pool.query('SELECT id, name, price, description, picture_path FROM products ORDER BY id LIMIT $1 OFFSET $2', [limit, offset]);
-        const products = productResult.rows.map(product => ({
-            id: product.id,
-            name: product.name,
-            price: product.price,
-            description: product.description,
-            image_url: cloudinary.url(product.picture_path) // Get the URL from Cloudinary
-        }));
-        res.json({ products, totalPages }); // Send both products and totalPages in the response
+      const offset = (page - 1) * limit;
+  
+      // Base product query
+      let productQuery = `
+        SELECT p.id, p.name, p.price, p.description, p.picture_path 
+        FROM products p
+      `;
+  
+      // If category is specified, add category filter
+      const queryParams = [];
+      if (category) {
+        productQuery += `
+          JOIN categories c ON p.category_id = c.id
+          WHERE c.name = $1
+        `;
+        queryParams.push(category);
+      }
+  
+      // Add limit and offset to the query
+      productQuery += `
+        ORDER BY p.id
+        LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}
+      `;
+      queryParams.push(limit, offset);
+  
+      // Execute the query
+      const productResult = await req.pool.query(productQuery, queryParams);
+      const products = productResult.rows.map(product => ({
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        description: product.description,
+        image_url: cloudinary.url(product.picture_path), // Adjust based on your setup
+        location: product.location, // Add if location is fetched from the database
+      }));
+  
+      // Fetch total count for pagination
+      let countQuery = `
+        SELECT COUNT(*) AS total
+        FROM products p
+      `;
+  
+      // If category is specified, add category filter to count query
+      if (category) {
+        countQuery += `
+          JOIN categories c ON p.category_id = c.id
+          WHERE c.name = $1
+        `;
+      }
+  
+      // Execute count query
+      const countResult = await req.pool.query(countQuery, category ? [category] : []);
+      const totalItems = parseInt(countResult.rows[0].total);
+      const totalPages = Math.ceil(totalItems / limit);
+  
+      res.json({ products, totalPages });
     } catch (error) {
-        console.error('Error fetching products:', error);
-        res.status(500).json({ message: 'Internal server error' });
+      console.error('Error fetching products:', error);
+      res.status(500).json({ message: 'Internal server error' });
     }
-};
-
-
-
-
-
+  };
+  
 
 module.exports = {
     postProduct,
     getAllProductData,
     upload
-}
+};
