@@ -49,70 +49,92 @@ const postProduct = async (req, res, pool) => {
 };
 
 const getAllProductData = async (req, res) => {
-    const { page = 1, limit = 9, category } = req.query;
-  
-    try {
-      const offset = (page - 1) * limit;
-  
-      // Base product query
-      let productQuery = `
-        SELECT p.id, p.name, p.price, p.description, p.picture_path 
-        FROM products p
-      `;
-  
-      // If category is specified, add category filter
-      const queryParams = [];
-      if (category) {
-        productQuery += `
-          JOIN categories c ON p.category_id = c.id
-          WHERE c.name = $1
-        `;
-        queryParams.push(category);
-      }
-  
-      // Add limit and offset to the query
+  const { page = 1, limit = 9, category, search } = req.query;
+
+  try {
+    const offset = (page - 1) * limit;
+
+    // Base product query
+    let productQuery = `
+      SELECT p.id, p.name, p.price, p.description, p.picture_path 
+      FROM products p
+    `;
+
+    // Initialize query parameters array
+    const queryParams = [];
+    
+    // Add category and/or search filters
+    if (category && search) {
       productQuery += `
-        ORDER BY p.id
-        LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}
+        JOIN categories c ON p.category_id = c.id
+        WHERE c.name = $1 AND p.name ILIKE $2
       `;
-      queryParams.push(limit, offset);
-  
-      // Execute the query
-      const productResult = await req.pool.query(productQuery, queryParams);
-      const products = productResult.rows.map(product => ({
-        id: product.id,
-        name: product.name,
-        price: product.price,
-        description: product.description,
-        image_url: cloudinary.url(product.picture_path), // Adjust based on your setup
-        location: product.location, // Add if location is fetched from the database
-      }));
-  
-      // Fetch total count for pagination
-      let countQuery = `
-        SELECT COUNT(*) AS total
-        FROM products p
+      queryParams.push(category, `%${search}%`);
+    } else if (category) {
+      productQuery += `
+        JOIN categories c ON p.category_id = c.id
+        WHERE c.name = $1
       `;
-  
-      // If category is specified, add category filter to count query
-      if (category) {
-        countQuery += `
-          JOIN categories c ON p.category_id = c.id
-          WHERE c.name = $1
-        `;
-      }
-  
-      // Execute count query
-      const countResult = await req.pool.query(countQuery, category ? [category] : []);
-      const totalItems = parseInt(countResult.rows[0].total);
-      const totalPages = Math.ceil(totalItems / limit);
-  
-      res.json({ products, totalPages });
-    } catch (error) {
-      console.error('Error fetching products:', error);
-      res.status(500).json({ message: 'Internal server error' });
+      queryParams.push(category);
+    } else if (search) {
+      productQuery += `
+        WHERE p.name ILIKE $1
+      `;
+      queryParams.push(`%${search}%`);
     }
-  };
+
+    // Add limit and offset to the query
+    productQuery += `
+      ORDER BY p.id
+      LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}
+    `;
+    queryParams.push(limit, offset);
+
+    // Execute the query
+    const productResult = await req.pool.query(productQuery, queryParams);
+    const products = productResult.rows.map(product => ({
+      id: product.id,
+      name: product.name,
+      price: product.price,
+      description: product.description,
+      image_url: cloudinary.url(product.picture_path), // Adjust based on your setup
+    }));
+
+    // Fetch total count for pagination
+    let countQuery = `
+      SELECT COUNT(*) AS total
+      FROM products p
+    `;
+
+    // Add category and/or search filters to count query
+    if (category && search) {
+      countQuery += `
+        JOIN categories c ON p.category_id = c.id
+        WHERE c.name = $1 AND p.name ILIKE $2
+      `;
+    } else if (category) {
+      countQuery += `
+        JOIN categories c ON p.category_id = c.id
+        WHERE c.name = $1
+      `;
+    } else if (search) {
+      countQuery += `
+        WHERE p.name ILIKE $1
+      `;
+    }
+
+    // Execute count query
+    const countParams = category ? (search ? [category, `%${search}%`] : [category]) : (search ? [`%${search}%`] : []);
+    const countResult = await req.pool.query(countQuery, countParams);
+    const totalItems = parseInt(countResult.rows[0].total);
+    const totalPages = Math.ceil(totalItems / limit);
+
+    res.json({ products, totalPages });
+  } catch (error) {
+    console.error('Error fetching products:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
   
 
 module.exports = {
