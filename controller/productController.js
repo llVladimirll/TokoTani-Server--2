@@ -48,7 +48,7 @@ const postProduct = async (req, res, pool) => {
     }
 };
 
-const getAllProductData = async (req, res) => {
+const getAllProductData = async (req, res, pool) => {
   const { page = 1, limit = 9, category, search } = req.query;
 
   try {
@@ -136,9 +136,125 @@ const getAllProductData = async (req, res) => {
   }
 };
   
+const getSingleProduct = async (req, res, pool) => {
+  const productId = req.params.id; // Access ID from route parameters
+
+  // Example SQL query to fetch product details, seller details, and feedback with user name
+  const productQuery = `
+      SELECT p.id, p.name AS product_name, p.price, p.description, p.picture_path,
+             s.name AS seller_name, s.location AS location, s.picture_path AS seller_picture,
+             f.rating, f.comment, f.created_at,
+             u.name AS user_name
+      FROM products p
+      JOIN seller s ON p.seller_id = s.id
+      LEFT JOIN feedback f ON p.id = f.product_id
+      LEFT JOIN users u ON f.user_id = u.id
+      WHERE p.id = $1
+  `;
+  
+  try {
+      // Execute the query using pool or any ORM method
+      const productResult = await pool.query(productQuery, [productId]);
+
+      // Check if product exists
+      if (productResult.rows.length === 0) {
+          return res.status(404).json({ message: 'Product not found' });
+      }
+
+      // Format product data
+      const product = {
+          id: productResult.rows[0].id,
+          name: productResult.rows[0].product_name,
+          price: productResult.rows[0].price,
+          description: productResult.rows[0].description,
+          image_url: productResult.rows[0].picture_path, // Adjust if using Cloudinary
+          seller: {
+              name: productResult.rows[0].seller_name,
+              location: productResult.rows[0].location,
+              picture_url: productResult.rows[0].seller_picture // Adjust if using Cloudinary
+          },
+          feedback: []
+      };
+
+      // Collect feedback for the product
+      productResult.rows.forEach(row => {
+          if (row.rating && row.comment) {
+              const feedbackItem = {
+                  rating: row.rating,
+                  comment: row.comment,
+                  created_at: row.created_at, // Include created_at timestamp
+                  user: {
+                      id: row.user_id, // Assuming you also want to include user ID
+                      name: row.user_name
+                  }
+              };
+              product.feedback.push(feedbackItem);
+          }
+      });
+
+      // Send response
+      res.json(product);
+  } catch (error) {
+      console.error('Error fetching product:', error);
+      res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+
+
+
+const postFeedback = async (req, res, pool) => {
+  const { product_id, user_id, rating, comment } = req.body;
+
+  // Debug: log request body
+  console.log('Request Body:', req.body);
+
+  // Ensure all necessary fields are provided
+  if (!product_id || !user_id || !rating || typeof comment === 'undefined') {
+    console.log('Validation Failed:', {
+      product_id,
+      user_id,
+      rating,
+      comment,
+      message: 'All fields are required'
+    });
+    return res.status(400).json({ message: 'All fields are required' });
+  }
+
+  // Convert rating to a number
+  const numericRating = Number(rating);
+
+  // Additional validation
+  if (isNaN(numericRating) || numericRating < 1 || numericRating > 5) {
+    return res.status(400).json({ message: 'Rating must be a number between 1 and 5' });
+  }
+
+  // Example SQL query to insert feedback into the database
+  const insertFeedbackQuery = `
+      INSERT INTO feedback (product_id, user_id, rating, comment, created_at)
+      VALUES ($1, $2, $3, $4, NOW())
+      RETURNING id, product_id, user_id, rating, comment, created_at
+  `;
+
+  try {
+      // Execute the query using pool or any ORM method
+      const feedbackResult = await pool.query(insertFeedbackQuery, [product_id, user_id, numericRating, comment]);
+
+      // Send response with the newly created feedback entry
+      res.status(201).json(feedbackResult.rows[0]);
+  } catch (error) {
+      console.error('Error posting feedback:', error);
+      res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+
+
 
 module.exports = {
     postProduct,
     getAllProductData,
-    upload
+    getSingleProduct,
+    upload,
+    postFeedback
 };

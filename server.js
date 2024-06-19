@@ -4,6 +4,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const userRoutes = require('./routes/userRoutes');
 const productRoutes = require('./routes/productRoutes');
+const sellerRoutes = require('./routes/sellerRoutes');
 
 dotenv.config();
 
@@ -32,6 +33,7 @@ pool.connect()
 
 app.use('/uploads', express.static('uploads'));
 
+app.use('/api/sellers', sellerRoutes)
 app.use('/api/users', userRoutes);
 app.use('/api/products', productRoutes)
 
