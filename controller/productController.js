@@ -137,66 +137,66 @@ const getAllProductData = async (req, res, pool) => {
 };
   
 const getSingleProduct = async (req, res, pool) => {
-  const productId = req.params.id; // Access ID from route parameters
+  const productId = req.params.id;
 
-  // Example SQL query to fetch product details, seller details, and feedback with user name
   const productQuery = `
-      SELECT p.id, p.name AS product_name, p.price, p.description, p.picture_path,
-             s.name AS seller_name, s.location AS location, s.picture_path AS seller_picture,
-             f.rating, f.comment, f.created_at,
-             u.name AS user_name
-      FROM products p
-      JOIN seller s ON p.seller_id = s.id
-      LEFT JOIN feedback f ON p.id = f.product_id
-      LEFT JOIN users u ON f.user_id = u.id
-      WHERE p.id = $1
-  `;
-  
+    SELECT p.id, p.name AS product_name, p.price, p.description, p.picture_path,
+           c.name AS category_name,
+           s.id AS seller_id,  -- Include seller_id
+           s.name AS seller_name, s.location AS location, s.picture_path AS seller_picture,
+           f.rating, f.comment, f.created_at,
+           u.name AS user_name
+    FROM products p
+    JOIN categories c ON p.category_id = c.id
+    JOIN seller s ON p.seller_id = s.id
+    LEFT JOIN feedback f ON p.id = f.product_id
+    LEFT JOIN users u ON f.user_id = u.id
+    WHERE p.id = $1
+`;
+
+
   try {
-      // Execute the query using pool or any ORM method
-      const productResult = await pool.query(productQuery, [productId]);
+    const productResult = await pool.query(productQuery, [productId]);
 
-      // Check if product exists
-      if (productResult.rows.length === 0) {
-          return res.status(404).json({ message: 'Product not found' });
-      }
+    if (productResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
 
-      // Format product data
-      const product = {
-          id: productResult.rows[0].id,
-          name: productResult.rows[0].product_name,
-          price: productResult.rows[0].price,
-          description: productResult.rows[0].description,
-          image_url: productResult.rows[0].picture_path, // Adjust if using Cloudinary
-          seller: {
-              name: productResult.rows[0].seller_name,
-              location: productResult.rows[0].location,
-              picture_url: productResult.rows[0].seller_picture // Adjust if using Cloudinary
+    const product = {
+      id: productResult.rows[0].id,
+      name: productResult.rows[0].product_name,
+      price: productResult.rows[0].price,
+      description: productResult.rows[0].description,
+      image_url: productResult.rows[0].picture_path,
+      seller_id: productResult.rows[0].seller_id,
+      category: productResult.rows[0].category_name,
+      seller: {
+        name: productResult.rows[0].seller_name,
+        location: productResult.rows[0].location,
+        picture_url: productResult.rows[0].seller_picture,
+      },
+      feedback: [],
+    };
+
+    productResult.rows.forEach(row => {
+      if (row.rating && row.comment) {
+        const feedbackItem = {
+          rating: row.rating,
+          comment: row.comment,
+          created_at: row.created_at,
+          user: {
+            id: row.user_id,
+            name: row.user_name,
           },
-          feedback: []
-      };
+        };
+        product.feedback.push(feedbackItem);
+      }
+    });
 
-      // Collect feedback for the product
-      productResult.rows.forEach(row => {
-          if (row.rating && row.comment) {
-              const feedbackItem = {
-                  rating: row.rating,
-                  comment: row.comment,
-                  created_at: row.created_at, // Include created_at timestamp
-                  user: {
-                      id: row.user_id, // Assuming you also want to include user ID
-                      name: row.user_name
-                  }
-              };
-              product.feedback.push(feedbackItem);
-          }
-      });
-
-      // Send response
-      res.json(product);
+    res.json(product);
   } catch (error) {
-      console.error('Error fetching product:', error);
-      res.status(500).json({ message: 'Internal server error' });
+    console.error('Error fetching product:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -248,6 +248,29 @@ const postFeedback = async (req, res, pool) => {
   }
 };
 
+const postCart = async (req, res, pool) => {
+  const { user_id, product_id, quantity } = req.body;
+
+    try {
+        const existingItemQuery = 'SELECT * FROM cart_items WHERE user_id = $1 AND product_id = $2';
+        const existingItem = await pool.query(existingItemQuery, [user_id, product_id]);
+
+        if (existingItem.rows.length > 0) {
+            // If the product is already in the cart, update the quantity
+            const updateQuery = 'UPDATE cart_items SET quantity = quantity + $1 WHERE user_id = $2 AND product_id = $3';
+            await pool.query(updateQuery, [quantity, user_id, product_id]);
+            res.json({ message: 'Product quantity updated successfully!' });
+        } else {
+            // If the product is not in the cart, insert a new entry
+            const insertQuery = 'INSERT INTO cart_items (user_id, product_id, quantity) VALUES ($1, $2, $3)';
+            await pool.query(insertQuery, [user_id, product_id, quantity]);
+            res.json({ message: 'Product added to cart successfully!' });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error adding product to cart' });
+    }
+};
 
 
 
@@ -256,5 +279,6 @@ module.exports = {
     getAllProductData,
     getSingleProduct,
     upload,
-    postFeedback
+    postFeedback,
+    postCart
 };
