@@ -1,6 +1,15 @@
 const multer = require('multer');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('../config/cloudinary');
+const jwt = require('jsonwebtoken');
+const { Groq } = require('groq-sdk');
+
+require('dotenv').config();
+
+const groq = new Groq({ apiKey: process.env.API_KEY });
+
+
+
 
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
@@ -15,18 +24,33 @@ const upload = multer({ storage: storage });
 
 const postSeller = async (req, res, pool) => {
     try {
-        const { name, info, location } = req.body;
-        const pictureUrl = req.file.path; // Cloudinary will provide the file URL after upload
+        const { name, info, location, phoneNumber } = req.body;
+        const { userId } = req.params;
+        const pictureUrl = req.file.path; // Assuming you're using multer or similar for file upload
 
         // Insert the seller details into your database
-        const insertQuery = 'INSERT INTO seller (name, info, location, picture_path) VALUES ($1, $2, $3, $4) RETURNING *';
-        const values = [name, info, location, pictureUrl];
+        const insertQuery = 'INSERT INTO seller (name, info, location, picture_path, phone_number, user_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *';
+        const values = [name, info, location, pictureUrl, phoneNumber, userId];
 
         const result = await pool.query(insertQuery, values);
 
+        // Update the user record to set isseller = true
+        const updateUserQuery = 'UPDATE users SET isseller = true WHERE id = $1';
+        await pool.query(updateUserQuery, [userId]);
+
+        // Retrieve the updated user information
+        const getUserQuery = 'SELECT * FROM users WHERE id = $1';
+        const userResult = await pool.query(getUserQuery, [userId]);
+        const user = userResult.rows[0];
+
+        const sellerToken = jwt.sign({ SellerID: result.rows[0].id }, process.env.JWT_SECRET, { expiresIn: '24h' });
+        const userToken = jwt.sign({ userID: user.id, isseller: user.isseller }, process.env.JWT_SECRET, { expiresIn: '12h' });
+
         res.status(200).json({
             message: 'Seller added successfully.',
-            seller: result.rows[0]
+            seller: result.rows[0],
+            sellerToken: sellerToken,
+            userToken: userToken // Return the updated userToken
         });
     } catch (error) {
         console.error('Error inserting seller:', error);
@@ -35,8 +59,141 @@ const postSeller = async (req, res, pool) => {
 };
 
 
+const getOrder = async (req, res, pool) => {
+    const { sellerId } = req.params; // Assuming sellerId is passed in req.params or req.query
+    
+    try {
+        const client = await pool.connect();
+        const result = await client.query(`
+            SELECT 
+                o.id as order_id, 
+                o.status, 
+                o.created_at, 
+                o.user_id,
+                oi.product_id, 
+                oi.quantity,
+                p.name as product_name, 
+                p.price, 
+                p.picture_path
+            FROM orders o
+            JOIN order_items oi ON o.id = oi.order_id
+            JOIN products p ON oi.product_id = p.id
+            WHERE p.seller_id = $1
+            ORDER BY o.created_at DESC
+        `, [sellerId]);
+        
+        client.release();
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error fetching orders', err);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+const getEarnings = async (req, res, pool) => {
+    const { sellerId } = req.params;
+    const { period } = req.query; // 'monthly', 'yearly', or 'weekly'
+
+    console.log(`Fetch URL received: ${req.originalUrl}`);
+  
+    let dateFormat;
+    let groupBy;
+  
+    switch (period) {
+      case 'yearly':
+        dateFormat = 'YYYY';
+        groupBy = `TO_CHAR(o.created_at, '${dateFormat}')`;
+        break;
+      case 'weekly':
+        dateFormat = 'IYYY-IW'; // ISO year and week number
+        groupBy = `TO_CHAR(o.created_at, '${dateFormat}')`;
+        break;
+      case 'monthly':
+      default:
+        dateFormat = 'YYYY-MM';
+        groupBy = `TO_CHAR(o.created_at, '${dateFormat}')`;
+        break;
+    }
+  
+    try {
+      const earningsData = await pool.query(
+        `SELECT 
+           TO_CHAR(o.created_at, '${dateFormat}') AS period,
+           SUM(oi.quantity * p.price) AS total
+         FROM orders o
+         JOIN order_items oi ON o.id = oi.order_id
+         JOIN products p ON oi.product_id = p.id
+         WHERE p.seller_id = $1 
+         GROUP BY ${groupBy}
+         ORDER BY period DESC`,
+        [sellerId]
+      );
+  
+      console.log("SQL Query result:", earningsData.rows);
+  
+      res.json(earningsData.rows);
+    } catch (err) {
+      console.error(err.message);
+      res.status(500).send('Server Error');
+    }
+  };
+
+  const getRecomendations = async (req, res, pool) => {
+    try {
+      const { rows } = await pool.query('SELECT name FROM products WHERE seller_id = $1', [req.params.sellerId]);
+      if (rows.length === 0) {
+        return res.status(404).json({ error: 'Product not found' });
+      }
+  
+      const product = rows[0];
+  
+      const response = await groq.chat.completions.create({
+        messages: [
+          {
+            role: 'user',
+            content: `Predict the best price for the following product: ${JSON.stringify(product)} price in rupiah and per kilogram. please just send the price no explanation needed and fixed. and please include the product name`,
+          },
+        ],
+        model: 'llama3-8b-8192',
+      });
+  
+      const predictedPrice = response.choices[0]?.message?.content || '';
+      res.json({ predictedPrice });
+    } catch (error) {
+      console.error('Error predicting product price:', error);
+      res.status(500).json({ error: 'Error predicting product price'});
+    }
+  };
+  
+
+  const getTotalEarnings = async (req, res, pool) => {
+    const { sellerId } = req.params;
+
+    try {
+        const result = await pool.query(`
+            SELECT 
+                SUM(oi.quantity * p.price) AS total_earnings
+            FROM orders o
+            JOIN order_items oi ON o.id = oi.order_id
+            JOIN products p ON oi.product_id = p.id
+            WHERE p.seller_id = $1
+        `, [sellerId]);
+
+        res.json({ totalEarnings: result.rows[0].total_earnings });
+    } catch (err) {
+        console.error('Error fetching total earnings', err);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+
+
 module.exports = {
    upload,
-   postSeller
+   postSeller,
+   getOrder,
+   getEarnings,
+   getRecomendations,
+   getTotalEarnings
 
 }

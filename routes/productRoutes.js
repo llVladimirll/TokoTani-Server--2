@@ -8,6 +8,10 @@ router.get('/', async (req, res) => productController.getAllProductData(req, res
 router.get('/:id', (req, res) => productController.getSingleProduct(req, res, req.pool));
 router.post('/feedback', (req, res) => productController.postFeedback(req, res, req.pool));
 router.post('/cart', (req, res) => productController.postCart(req, res, req.pool));
+router.get('/cart/:id', (req, res) => productController.getShoppingCart(req, res, req.pool));
+router.put('/cart/:userId/:itemId', (req, res) => productController.putCart(req, res, req.pool));
+router.post('/checkout/:userId', (req, res) => productController.postCheckout(req, res, req.pool));
+router.get('/order/:sellerID', (req, res) => productController.getOrder(req, res, req.pool));
 
 
 module.exports = router;

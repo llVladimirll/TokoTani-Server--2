@@ -42,6 +42,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/products', productRoutes)
 
 
+
+
 const PORT = process.env.PORT || 3330; // Default port 3000 if PORT is not provided
 const server = app.listen(PORT, () => console.log(`Listening on port ${PORT}`));
 

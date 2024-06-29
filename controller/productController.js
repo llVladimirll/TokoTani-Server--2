@@ -2,6 +2,7 @@ const multer = require('multer');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('../config/cloudinary');
 
+
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: {
@@ -272,6 +273,137 @@ const postCart = async (req, res, pool) => {
     }
 };
 
+const getShoppingCart = async (req, res, pool) => {
+  const user_id = req.params.id;
+
+  // Debug: log user ID
+  console.log('Fetching cart for user:', user_id);
+
+  try {
+      const cartQuery = `
+          SELECT 
+              ci.product_id, 
+              ci.quantity, 
+              p.name, 
+              p.price, 
+              p.description, 
+              p.picture_path,
+              a.city
+          FROM cart_items ci
+          JOIN products p ON ci.product_id = p.id
+          JOIN addresses a ON a.user_id = ci.user_id
+          WHERE ci.user_id = $1
+      `;
+
+      const cartResult = await pool.query(cartQuery, [user_id]);
+
+      if (cartResult.rows.length === 0) {
+          return res.status(404).json({ message: 'No items found in cart' });
+      }
+
+      const cartItems = cartResult.rows.map(item => ({
+          product_id: item.product_id,
+          quantity: item.quantity,
+          name: item.name,
+          price: item.price,
+          description: item.description,
+          picture_path: item.picture_path,
+      }));
+
+      // Assuming city is the same for all cart items, take it from the first item
+      const city = cartResult.rows[0].city;
+
+      res.status(200).json({ cartItems, city });
+  } catch (error) {
+      console.error('Error fetching cart:', error);
+      res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+const putCart = async (req, res, pool) => {
+  const { userId, itemId } = req.params;
+  const { quantity } = req.body;
+
+  try {
+    // Update the quantity of the item in the cart_items table
+    const updateQuery = `
+      UPDATE cart_items 
+      SET quantity = $1
+      WHERE user_id = $2 AND product_id = $3
+      RETURNING *
+    `;
+    
+    const updateResult = await pool.query(updateQuery, [quantity, userId, itemId]);
+
+    if (updateResult.rows.length === 0) {
+      return res.status(404).json({ error: "Cart item not found" });
+    }
+
+    const updatedCartItem = updateResult.rows[0];
+
+    res.json({ message: "Cart item quantity updated successfully", updatedCartItem });
+  } catch (error) {
+    console.error("Error updating cart item quantity:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+const postCheckout = async (req, res, pool) => {
+  const { userId } = req.params;
+
+  try {
+      // Retrieve cart items for the user
+      const cartQuery = 'SELECT * FROM cart_items WHERE user_id = $1';
+      const cartItems = await pool.query(cartQuery, [userId]);
+
+      if (cartItems.rows.length === 0) {
+          return res.status(404).json({ message: 'No items found in cart' });
+      }
+
+      // Start a transaction to ensure atomicity
+      await pool.query('BEGIN');
+
+      // Insert order into orders table
+      const insertOrderQuery = `
+          INSERT INTO orders (user_id, status, created_at)
+          VALUES ($1, 'payment_complete', NOW())
+          RETURNING id
+      `;
+      const orderResult = await pool.query(insertOrderQuery, [userId]);
+      const orderId = orderResult.rows[0].id;
+
+      // Insert each cart item as order items
+      for (const cartItem of cartItems.rows) {
+          const { product_id, quantity } = cartItem;
+
+          const insertOrderItemQuery = `
+              INSERT INTO order_items (order_id, product_id, quantity)
+              VALUES ($1, $2, $3)
+          `;
+          await pool.query(insertOrderItemQuery, [orderId, product_id, quantity]);
+      }
+
+      // Delete all cart items after moving to orders
+      const deleteCartItemsQuery = `
+          DELETE FROM cart_items
+          WHERE user_id = $1
+      `;
+      await pool.query(deleteCartItemsQuery, [userId]);
+
+      // Commit transaction
+      await pool.query('COMMIT');
+
+      res.status(200).json({ message: 'Checkout successful', orderId });
+  } catch (error) {
+      // Rollback transaction in case of error
+      await pool.query('ROLLBACK');
+      console.error('Error during checkout:', error);
+      res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+
+
 
 
 module.exports = {
@@ -280,5 +412,8 @@ module.exports = {
     getSingleProduct,
     upload,
     postFeedback,
-    postCart
+    postCart,
+    getShoppingCart,
+    putCart,
+    postCheckout
 };
