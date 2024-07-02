@@ -6,8 +6,8 @@ const cloudinary = require('../config/cloudinary');
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: {
-        folder: 'uploads/products', // specify the folder in your Cloudinary account
-        format: 'jpg', // supports promises as well
+        folder: 'uploads/products',
+        format: 'jpg', 
     },
 });
 
@@ -24,7 +24,7 @@ const postProduct = async (req, res, pool) => {
     const publicId = req.file.filename;
 
     try {
-        // Get category_id from the category name
+        
         const categoryResult = await pool.query(
             'SELECT id FROM categories WHERE name = $1',
             [categoryName]
@@ -55,16 +55,14 @@ const getAllProductData = async (req, res, pool) => {
   try {
     const offset = (page - 1) * limit;
 
-    // Base product query
     let productQuery = `
       SELECT p.id, p.name, p.price, p.description, p.picture_path 
       FROM products p
     `;
 
-    // Initialize query parameters array
+
     const queryParams = [];
     
-    // Add category and/or search filters
     if (category && search) {
       productQuery += `
         JOIN categories c ON p.category_id = c.id
@@ -350,59 +348,85 @@ const putCart = async (req, res, pool) => {
 
 const postCheckout = async (req, res, pool) => {
   const { userId } = req.params;
+  const { address_id } = req.body; // Retrieve address_id from the request body
 
   try {
-      // Retrieve cart items for the user
-      const cartQuery = 'SELECT * FROM cart_items WHERE user_id = $1';
-      const cartItems = await pool.query(cartQuery, [userId]);
+    // Retrieve cart items for the user
+    const cartQuery = 'SELECT * FROM cart_items WHERE user_id = $1';
+    const cartItems = await pool.query(cartQuery, [userId]);
 
-      if (cartItems.rows.length === 0) {
-          return res.status(404).json({ message: 'No items found in cart' });
-      }
+    if (cartItems.rows.length === 0) {
+      return res.status(404).json({ message: 'No items found in cart' });
+    }
 
-      // Start a transaction to ensure atomicity
-      await pool.query('BEGIN');
+    // Start a transaction to ensure atomicity
+    await pool.query('BEGIN');
 
-      // Insert order into orders table
-      const insertOrderQuery = `
-          INSERT INTO orders (user_id, status, created_at)
-          VALUES ($1, 'payment_complete', NOW())
-          RETURNING id
+    // Insert order into orders table with address_id
+    const insertOrderQuery = `
+      INSERT INTO orders (user_id, status, created_at, address_id)
+      VALUES ($1, 'payment_complete', NOW(), $2)
+      RETURNING id
+    `;
+    const orderResult = await pool.query(insertOrderQuery, [userId, address_id]);
+    const orderId = orderResult.rows[0].id;
+
+    // Insert each cart item as order items
+    for (const cartItem of cartItems.rows) {
+      const { product_id, quantity } = cartItem;
+
+      const insertOrderItemQuery = `
+        INSERT INTO order_items (order_id, product_id, quantity)
+        VALUES ($1, $2, $3)
       `;
-      const orderResult = await pool.query(insertOrderQuery, [userId]);
-      const orderId = orderResult.rows[0].id;
+      await pool.query(insertOrderItemQuery, [orderId, product_id, quantity]);
+    }
 
-      // Insert each cart item as order items
-      for (const cartItem of cartItems.rows) {
-          const { product_id, quantity } = cartItem;
+    // Delete all cart items after moving to orders
+    const deleteCartItemsQuery = `
+      DELETE FROM cart_items
+      WHERE user_id = $1
+    `;
+    await pool.query(deleteCartItemsQuery, [userId]);
 
-          const insertOrderItemQuery = `
-              INSERT INTO order_items (order_id, product_id, quantity)
-              VALUES ($1, $2, $3)
-          `;
-          await pool.query(insertOrderItemQuery, [orderId, product_id, quantity]);
-      }
+    // Commit transaction
+    await pool.query('COMMIT');
 
-      // Delete all cart items after moving to orders
-      const deleteCartItemsQuery = `
-          DELETE FROM cart_items
-          WHERE user_id = $1
-      `;
-      await pool.query(deleteCartItemsQuery, [userId]);
-
-      // Commit transaction
-      await pool.query('COMMIT');
-
-      res.status(200).json({ message: 'Checkout successful', orderId });
+    res.status(200).json({ message: 'Checkout successful', orderId });
   } catch (error) {
-      // Rollback transaction in case of error
-      await pool.query('ROLLBACK');
-      console.error('Error during checkout:', error);
-      res.status(500).json({ message: 'Internal server error' });
+    // Rollback transaction in case of error
+    await pool.query('ROLLBACK');
+    console.error('Error during checkout:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
 
+const deleteCartItem = async (req, res, pool) =>{
+  const { userId, itemId } = req.params;
+
+  try {
+    // Query to delete the item from the cart_items table
+    const deleteQuery = `
+      DELETE FROM cart_items 
+      WHERE user_id = $1 AND product_id = $2
+      RETURNING *
+    `;
+
+    const deleteResult = await pool.query(deleteQuery, [userId, itemId]);
+
+    if (deleteResult.rowCount === 0) {
+      return res.status(404).json({ error: "Cart item not found" });
+    }
+
+    const deletedCartItem = deleteResult.rows[0];
+
+    res.json({ message: "Cart item deleted successfully", deletedCartItem });
+  } catch (error) {
+    console.error("Error deleting cart item:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
 
 
 
@@ -415,5 +439,6 @@ module.exports = {
     postCart,
     getShoppingCart,
     putCart,
-    postCheckout
+    postCheckout,
+    deleteCartItem
 };

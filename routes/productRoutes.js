@@ -12,6 +12,6 @@ router.get('/cart/:id', (req, res) => productController.getShoppingCart(req, res
 router.put('/cart/:userId/:itemId', (req, res) => productController.putCart(req, res, req.pool));
 router.post('/checkout/:userId', (req, res) => productController.postCheckout(req, res, req.pool));
 router.get('/order/:sellerID', (req, res) => productController.getOrder(req, res, req.pool));
-
+router.delete('/cart/:sellerId/:itemId', (req, res) => productController.deleteCartItem(req, res, req.pool));
 
 module.exports = router;

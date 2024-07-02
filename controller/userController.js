@@ -74,8 +74,22 @@ const postAddress = async (req, res, pool) => {
   }
 };
 
+const getAdresses = async (req, res, pool) => {
+  const userId = req.params.userId;
+
+  try {
+    const result = await pool.query('SELECT * FROM addresses WHERE user_id = $1', [userId]);
+    const addresses = result.rows;
+    res.status(200).json(addresses);
+  } catch (error) {
+    console.error('Error retrieving addresses:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+}
+
 module.exports = {
     register,
     login,
-    postAddress
+    postAddress,
+    getAdresses
 }

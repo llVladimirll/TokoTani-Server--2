@@ -60,35 +60,49 @@ const postSeller = async (req, res, pool) => {
 
 
 const getOrder = async (req, res, pool) => {
-    const { sellerId } = req.params; // Assuming sellerId is passed in req.params or req.query
-    
-    try {
-        const client = await pool.connect();
-        const result = await client.query(`
-            SELECT 
-                o.id as order_id, 
-                o.status, 
-                o.created_at, 
-                o.user_id,
-                oi.product_id, 
-                oi.quantity,
-                p.name as product_name, 
-                p.price, 
-                p.picture_path
-            FROM orders o
-            JOIN order_items oi ON o.id = oi.order_id
-            JOIN products p ON oi.product_id = p.id
-            WHERE p.seller_id = $1
-            ORDER BY o.created_at DESC
-        `, [sellerId]);
-        
-        client.release();
-        res.json(result.rows);
-    } catch (err) {
-        console.error('Error fetching orders', err);
-        res.status(500).json({ error: 'Internal Server Error' });
-    }
+  const { sellerId } = req.params; // Assuming sellerId is passed in req.params or req.query
+  
+  try {
+    const client = await pool.connect();
+    const result = await client.query(`
+      SELECT 
+        o.id as order_id, 
+        o.status, 
+        o.created_at, 
+        o.user_id,
+        u.name as user_name,    -- Join users table to get user_name
+        a.address_line1,
+        a.address_line2,        -- Address line from addresses table
+        a.city,
+        a.postal_code,
+        a.province,
+        a.country,
+        json_agg(json_build_object(
+          'product_id', oi.product_id,
+          'quantity', oi.quantity,
+          'product_name', p.name,
+          'price', p.price,
+          'picture_path', p.picture_path
+        )) as order_items
+      FROM orders o
+      JOIN order_items oi ON o.id = oi.order_id
+      JOIN products p ON oi.product_id = p.id
+      JOIN users u ON o.user_id = u.id    -- Join with users table
+      JOIN addresses a ON o.address_id = a.id  -- Join with addresses table using address_id from orders
+      WHERE p.seller_id = $1
+      GROUP BY o.id, o.status, o.created_at, o.user_id, u.name, a.address_line1, a.address_line2, a.city, a.province, a.postal_code, a.country
+      ORDER BY o.created_at DESC
+    `, [sellerId]);
+      
+    client.release();
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching orders', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
 };
+
+
 
 const getEarnings = async (req, res, pool) => {
     const { sellerId } = req.params;
@@ -140,30 +154,37 @@ const getEarnings = async (req, res, pool) => {
 
   const getRecomendations = async (req, res, pool) => {
     try {
+      // Fetch all products for the seller
       const { rows } = await pool.query('SELECT name FROM products WHERE seller_id = $1', [req.params.sellerId]);
+      
       if (rows.length === 0) {
-        return res.status(404).json({ error: 'Product not found' });
+        return res.status(404).json({ error: 'Products not found for this seller' });
       }
+      
+      // Prepare messages for prediction API
+      const messages = rows.map(product => ({
+        role: 'user',
+        content: `Predict the best price for the following product: ${product.name} price in rupiah and per kilogram. Please just send the price, no explanation needed and fixed.`,
+      }));
   
-      const product = rows[0];
+      // Make prediction request for each product
+      const responses = await Promise.all(messages.map(message => 
+        groq.chat.completions.create({
+          messages: [message],
+          model: 'llama3-8b-8192',
+        })
+      ));
   
-      const response = await groq.chat.completions.create({
-        messages: [
-          {
-            role: 'user',
-            content: `Predict the best price for the following product: ${JSON.stringify(product)} price in rupiah and per kilogram. please just send the price no explanation needed and fixed. and please include the product name`,
-          },
-        ],
-        model: 'llama3-8b-8192',
-      });
+      // Extract predicted prices
+      const predictedPrices = responses.map(response => response.choices[0]?.message?.content || '');
   
-      const predictedPrice = response.choices[0]?.message?.content || '';
-      res.json({ predictedPrice });
+      res.json({ predictedPrices });
     } catch (error) {
-      console.error('Error predicting product price:', error);
-      res.status(500).json({ error: 'Error predicting product price'});
+      console.error('Error predicting product prices:', error);
+      res.status(500).json({ error: 'Error predicting product prices' });
     }
   };
+  
   
 
   const getTotalEarnings = async (req, res, pool) => {
