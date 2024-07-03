@@ -164,7 +164,7 @@ const getEarnings = async (req, res, pool) => {
       // Prepare messages for prediction API
       const messages = rows.map(product => ({
         role: 'user',
-        content: `Predict the best price for the following product: ${product.name} price in rupiah and per kilogram. Please just send the price, no explanation needed and fixed.`,
+        content: `Predict the best price for the following product: ${product.name} price in rupiah and per kilogram. Please just send the price, no explanation needed and show the product name too.`,
       }));
   
       // Make prediction request for each product

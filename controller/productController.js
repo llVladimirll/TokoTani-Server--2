@@ -2,6 +2,13 @@ const multer = require('multer');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('../config/cloudinary');
 
+const formatPriceToIDR = (price) => {
+  return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR'
+  }).format(price);
+};
+
 
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
@@ -14,64 +21,69 @@ const storage = new CloudinaryStorage({
 const upload = multer({ storage: storage });
 
 const postProduct = async (req, res, pool) => {
-    const { name, price, description, sellerID, categoryName } = req.body;
+  const { sellerId } = req.params;
+  const { name, price, description, categoryName } = req.body;
 
-    if (!req.file) {
-        return res.status(400).json({ message: 'No file uploaded' });
-    }
+  if (!req.file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+  }
 
-    const picturePath = req.file.path;
-    const publicId = req.file.filename;
+  const picturePath = req.file.path;
+  const publicId = req.file.filename;
 
-    try {
-        
-        const categoryResult = await pool.query(
-            'SELECT id FROM categories WHERE name = $1',
-            [categoryName]
-        );
+  console.log("Received sellerId:", sellerId);
+  console.log("Received product data:", { name, price, description, categoryName });
 
-        if (categoryResult.rows.length === 0) {
-            return res.status(404).json({ message: 'Category not found' });
-        }
+  try {
+      const categoryResult = await pool.query(
+          'SELECT id FROM categories WHERE name = $1',
+          [categoryName]
+      );
 
-        const categoryId = categoryResult.rows[0].id;
+      if (categoryResult.rows.length === 0) {
+          return res.status(404).json({ message: 'Category not found' });
+      }
 
-        // Insert product with category_id
-        await pool.query(
-            'INSERT INTO products (name, price, description, created_at, picture_path, seller_id, category_id) VALUES ($1, $2, $3, NOW(), $4, $5, $6)',
-            [name, price, description, picturePath, sellerID, categoryId]
-        );
+      const categoryId = categoryResult.rows[0].id;
 
-        res.status(201).json({ message: 'Product added successfully' });
-    } catch (error) {
-        console.error('Error inserting product:', error);
-        res.status(500).json({ message: 'Internal server error' });
-    }
+      // Insert product with category_id
+      await pool.query(
+          'INSERT INTO products (name, price, description, created_at, picture_path, seller_id, category_id) VALUES ($1, $2, $3, NOW(), $4, $5, $6)',
+          [name, price, description, picturePath, sellerId, categoryId]
+      );
+
+      res.status(201).json({ message: 'Product added successfully' });
+  } catch (error) {
+      console.error('Error inserting product:', error);
+      res.status(500).json({ message: 'Internal server error' });
+  }
 };
 
+
 const getAllProductData = async (req, res, pool) => {
-  const { page = 1, limit = 9, category, search } = req.query;
+  const { page = 1, limit = 9, category, search, location, min_price, max_price } = req.query;
 
   try {
     const offset = (page - 1) * limit;
 
     let productQuery = `
-      SELECT p.id, p.name, p.price, p.description, p.picture_path 
+      SELECT p.id, p.name, p.price, p.description, p.picture_path, s.location AS seller_location
       FROM products p
+      LEFT JOIN seller s ON p.seller_id = s.id
     `;
 
-
     const queryParams = [];
-    
+
+    // Handle category, search, location, and price range filters
     if (category && search) {
       productQuery += `
-        JOIN categories c ON p.category_id = c.id
+        LEFT JOIN categories c ON p.category_id = c.id
         WHERE c.name = $1 AND p.name ILIKE $2
       `;
       queryParams.push(category, `%${search}%`);
     } else if (category) {
       productQuery += `
-        JOIN categories c ON p.category_id = c.id
+        LEFT JOIN categories c ON p.category_id = c.id
         WHERE c.name = $1
       `;
       queryParams.push(category);
@@ -80,6 +92,36 @@ const getAllProductData = async (req, res, pool) => {
         WHERE p.name ILIKE $1
       `;
       queryParams.push(`%${search}%`);
+    } else {
+      productQuery += `
+        WHERE 1=1
+      `;
+    }
+
+    // Filter by seller location
+    if (location) {
+      productQuery += `
+        AND s.location ILIKE $${queryParams.length + 1}
+      `;
+      queryParams.push(`%${location}%`);
+    }
+
+    // Filter by price range
+    if (min_price && max_price) {
+      productQuery += `
+        AND p.price BETWEEN $${queryParams.length + 1} AND $${queryParams.length + 2}
+      `;
+      queryParams.push(min_price, max_price);
+    } else if (min_price) {
+      productQuery += `
+        AND p.price >= $${queryParams.length + 1}
+      `;
+      queryParams.push(min_price);
+    } else if (max_price) {
+      productQuery += `
+        AND p.price <= $${queryParams.length + 1}
+      `;
+      queryParams.push(max_price);
     }
 
     // Add limit and offset to the query
@@ -90,13 +132,14 @@ const getAllProductData = async (req, res, pool) => {
     queryParams.push(limit, offset);
 
     // Execute the query
-    const productResult = await req.pool.query(productQuery, queryParams);
+    const productResult = await pool.query(productQuery, queryParams);
     const products = productResult.rows.map(product => ({
       id: product.id,
       name: product.name,
-      price: product.price,
+      price: formatPriceToIDR(product.price),
       description: product.description,
       image_url: cloudinary.url(product.picture_path), // Adjust based on your setup
+      seller_location: product.seller_location || 'Location not specified'  // Default value if seller_location is null or undefined
     }));
 
     // Fetch total count for pagination
@@ -105,26 +148,58 @@ const getAllProductData = async (req, res, pool) => {
       FROM products p
     `;
 
-    // Add category and/or search filters to count query
+    // Add category, search, location, and price range filters to count query
     if (category && search) {
       countQuery += `
-        JOIN categories c ON p.category_id = c.id
+        LEFT JOIN categories c ON p.category_id = c.id
         WHERE c.name = $1 AND p.name ILIKE $2
       `;
     } else if (category) {
       countQuery += `
-        JOIN categories c ON p.category_id = c.id
+        LEFT JOIN categories c ON p.category_id = c.id
         WHERE c.name = $1
       `;
     } else if (search) {
       countQuery += `
         WHERE p.name ILIKE $1
       `;
+    } else {
+      countQuery += `
+        WHERE 1=1
+      `;
+    }
+
+    // Filter by seller location in count query
+    if (location) {
+      countQuery += `
+        AND s.location ILIKE $${countParams.length + 1}
+      `;
+    }
+
+    // Filter by price range in count query
+    if (min_price && max_price) {
+      countQuery += `
+        AND p.price BETWEEN $${countParams.length + 1} AND $${countParams.length + 2}
+      `;
+    } else if (min_price) {
+      countQuery += `
+        AND p.price >= $${countParams.length + 1}
+      `;
+    } else if (max_price) {
+      countQuery += `
+        AND p.price <= $${countParams.length + 1}
+      `;
     }
 
     // Execute count query
-    const countParams = category ? (search ? [category, `%${search}%`] : [category]) : (search ? [`%${search}%`] : []);
-    const countResult = await req.pool.query(countQuery, countParams);
+    const countParams = [];
+    if (category) countParams.push(category);
+    if (search) countParams.push(`%${search}%`);
+    if (location) countParams.push(`%${location}%`);
+    if (min_price) countParams.push(min_price);
+    if (max_price) countParams.push(max_price);
+
+    const countResult = await pool.query(countQuery, countParams);
     const totalItems = parseInt(countResult.rows[0].total);
     const totalPages = Math.ceil(totalItems / limit);
 
@@ -134,6 +209,8 @@ const getAllProductData = async (req, res, pool) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+
   
 const getSingleProduct = async (req, res, pool) => {
   const productId = req.params.id;
