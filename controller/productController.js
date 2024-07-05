@@ -218,8 +218,7 @@ const getSingleProduct = async (req, res, pool) => {
   const productQuery = `
     SELECT p.id, p.name AS product_name, p.price, p.description, p.picture_path,
            c.name AS category_name,
-           s.id AS seller_id,  -- Include seller_id
-           s.name AS seller_name, s.location AS location, s.picture_path AS seller_picture,
+           s.id AS seller_id, s.name AS seller_name, s.location, s.phone_number, s.picture_path AS seller_picture,
            f.rating, f.comment, f.created_at,
            u.name AS user_name
     FROM products p
@@ -228,8 +227,7 @@ const getSingleProduct = async (req, res, pool) => {
     LEFT JOIN feedback f ON p.id = f.product_id
     LEFT JOIN users u ON f.user_id = u.id
     WHERE p.id = $1
-`;
-
+  `;
 
   try {
     const productResult = await pool.query(productQuery, [productId]);
@@ -244,11 +242,12 @@ const getSingleProduct = async (req, res, pool) => {
       price: productResult.rows[0].price,
       description: productResult.rows[0].description,
       image_url: productResult.rows[0].picture_path,
-      seller_id: productResult.rows[0].seller_id,
       category: productResult.rows[0].category_name,
       seller: {
+        id: productResult.rows[0].seller_id,
         name: productResult.rows[0].seller_name,
         location: productResult.rows[0].location,
+        phone_number: productResult.rows[0].phone_number,
         picture_url: productResult.rows[0].seller_picture,
       },
       feedback: [],
@@ -261,7 +260,6 @@ const getSingleProduct = async (req, res, pool) => {
           comment: row.comment,
           created_at: row.created_at,
           user: {
-            id: row.user_id,
             name: row.user_name,
           },
         };
@@ -275,9 +273,6 @@ const getSingleProduct = async (req, res, pool) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
-
-
-
 
 const postFeedback = async (req, res, pool) => {
   const { product_id, user_id, rating, comment } = req.body;

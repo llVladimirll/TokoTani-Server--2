@@ -44,7 +44,7 @@ const login = async (req, res, pool) => {
         return res.status(401).json({ message: 'User is marked as seller but no corresponding seller found' });
       }
       const seller = sellerResult.rows[0];
-      const sellerToken = jwt.sign({ SellerID: seller.id }, process.env.JWT_SECRET, { expiresIn: '24h' });
+      const sellerToken = jwt.sign({ SellerID: seller.id }, process.env.JWT_SECRET, { expiresIn: '12h' });
 
       return res.status(200).json({ userToken, sellerToken });
     } else {
