@@ -350,45 +350,46 @@ const getShoppingCart = async (req, res, pool) => {
   console.log('Fetching cart for user:', user_id);
 
   try {
-      const cartQuery = `
-          SELECT 
-              ci.product_id, 
-              ci.quantity, 
-              p.name, 
-              p.price, 
-              p.description, 
-              p.picture_path,
-              a.city
-          FROM cart_items ci
-          JOIN products p ON ci.product_id = p.id
-          JOIN addresses a ON a.user_id = ci.user_id
-          WHERE ci.user_id = $1
-      `;
+    const cartQuery = `
+    SELECT 
+      ci.product_id, 
+      ci.quantity, 
+      p.name, 
+      p.price, 
+      p.description, 
+      p.picture_path
+    FROM cart_items ci
+    JOIN products p ON ci.product_id = p.id
+    WHERE ci.user_id = $1
+  `;
+  
 
-      const cartResult = await pool.query(cartQuery, [user_id]);
 
-      if (cartResult.rows.length === 0) {
-          return res.status(404).json({ message: 'No items found in cart' });
-      }
+    const cartResult = await pool.query(cartQuery, [user_id]);
 
-      const cartItems = cartResult.rows.map(item => ({
-          product_id: item.product_id,
-          quantity: item.quantity,
-          name: item.name,
-          price: item.price,
-          description: item.description,
-          picture_path: item.picture_path,
-      }));
+    if (cartResult.rows.length === 0) {
+      return res.status(404).json({ message: 'No items found in cart' });
+    }
 
-      // Assuming city is the same for all cart items, take it from the first item
-      const city = cartResult.rows[0].city;
+    const cartItems = cartResult.rows.map(item => ({
+      product_id: item.product_id,
+      quantity: item.quantity,
+      name: item.name,
+      price: item.price,
+      description: item.description,
+      picture_path: item.picture_path,
+    }));
 
-      res.status(200).json({ cartItems, city });
+    // Assuming city is the same for all cart items, take it from the first item
+
+
+    res.status(200).json({ cartItems });
   } catch (error) {
-      console.error('Error fetching cart:', error);
-      res.status(500).json({ message: 'Internal server error' });
+    console.error('Error fetching cart:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
+
 
 const putCart = async (req, res, pool) => {
   const { userId, itemId } = req.params;
