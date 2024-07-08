@@ -50,7 +50,6 @@ const postSeller = async (req, res, pool) => {
             message: 'Seller added successfully.',
             seller: result.rows[0],
             sellerToken: sellerToken,
-            userToken: userToken // Return the updated userToken
         });
     } catch (error) {
         console.error('Error inserting seller:', error);
@@ -161,13 +160,12 @@ const getEarnings = async (req, res, pool) => {
         return res.status(404).json({ error: 'Products not found for this seller' });
       }
       
-      // Prepare messages for prediction API
+      
       const messages = rows.map(product => ({
         role: 'user',
         content: `Predict the best price for the following product: ${product.name} price in rupiah and per kilogram. Please just send the price, no explanation needed and show the product name too.`,
       }));
   
-      // Make prediction request for each product
       const responses = await Promise.all(messages.map(message => 
         groq.chat.completions.create({
           messages: [message],
@@ -182,6 +180,31 @@ const getEarnings = async (req, res, pool) => {
     } catch (error) {
       console.error('Error predicting product prices:', error);
       res.status(500).json({ error: 'Error predicting product prices' });
+    }
+  };
+  
+  
+  const shipProducts = async (req, res, pool) => {
+    const { orderId } = req.params;
+  
+    try {
+      // Update the order status to "product is shipping"
+      const updateQuery = 'UPDATE orders SET status = $1 WHERE id = $2 RETURNING *';
+      const values = ['Product is Shipping', orderId];
+  
+      const result = await pool.query(updateQuery, values);
+  
+      if (result.rowCount === 0) {
+        return res.status(404).json({ message: 'Order not found' });
+      }
+  
+      res.status(200).json({
+        message: 'Order status updated to "product is shipping".',
+        order: result.rows[0]
+      });
+    } catch (error) {
+      console.error('Error updating order status:', error);
+      res.status(500).json({ message: 'Failed to update order status.' });
     }
   };
   
@@ -208,13 +231,31 @@ const getEarnings = async (req, res, pool) => {
 };
 
 
+const getProduct = async (req, res, pool) => {
+  const { sellerId } = req.params;
+
+  try {
+    const result = await pool.query(`
+      SELECT id, name, price, picture_path 
+      FROM products 
+      WHERE seller_id = $1
+    `, [sellerId]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching products:', error);
+    res.status(500).json({ error: 'Failed to fetch products' });
+  }
+};
+
 
 module.exports = {
+  getProduct,
    upload,
    postSeller,
    getOrder,
    getEarnings,
    getRecomendations,
-   getTotalEarnings
+   getTotalEarnings,
+   shipProducts
 
 }
