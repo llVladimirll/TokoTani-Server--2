@@ -247,6 +247,102 @@ const getProduct = async (req, res, pool) => {
   }
 };
 
+const putProduct = async (req, res, pool) => {
+  const { productId } = req.params;
+const { name, category_name, price, description } = req.body;
+console.log(req.body);
+
+
+
+try {
+  const updateQuery = `
+    UPDATE products
+    SET name = $1, 
+        category_id = (SELECT id FROM categories WHERE name = $2),
+        price = $3, 
+        description = $4
+    WHERE id = $5
+    RETURNING *
+  `;
+  const values = [name, category_name, price, description, productId];
+
+  const result = await pool.query(updateQuery, values);
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({ message: 'Product not found or not updated' });
+  }
+
+  res.json({
+    message: 'Product updated successfully',
+    product: result.rows[0],
+  });
+} catch (error) {
+  console.error('Error updating product:', error);
+  res.status(500).json({ error: 'Failed to update product' });
+}
+
+};
+
+
+
+
+const getProductForEdit = async (req, res, pool) => {
+  const { productId } = req.params;
+  
+
+  try {
+    const result = await pool.query(`
+      SELECT  
+        p.name, 
+        c.name as category_name, 
+        p.price, 
+        p.description
+      FROM products p
+      JOIN categories c ON p.category_id = c.id
+      WHERE p.id = $1
+    `, [productId]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching product:', error);
+    res.status(500).json({ error: 'Failed to fetch product' });
+  }
+};
+
+const deleteProduct = async (req, res, pool) => {
+  const productId = req.params.productId;
+
+  try {
+    // Delete all order items associated with the product
+    await pool.query('DELETE FROM feedback WHERE product_id = $1', [productId]);
+    
+    await pool.query('DELETE FROM order_items WHERE product_id = $1', [productId]);
+
+    
+
+    // Now delete the product itself
+    const result = await pool.query('DELETE FROM products WHERE id = $1 RETURNING *', [productId]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    res.json({ message: 'Product deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting product:', error);
+    res.status(500).json({ error: 'Failed to delete product' });
+  }
+};
+
+
+
+
+
+
 
 module.exports = {
   getProduct,
@@ -256,6 +352,9 @@ module.exports = {
    getEarnings,
    getRecomendations,
    getTotalEarnings,
-   shipProducts
+   shipProducts,
+   putProduct,
+   getProductForEdit,
+   deleteProduct
 
 }
