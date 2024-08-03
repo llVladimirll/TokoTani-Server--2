@@ -113,10 +113,67 @@ const getAllProductData = async (req, res) => {
       res.status(500).json({ message: 'Internal server error' });
     }
   };
+
+  const getDataWithSearch = (req, res) => {const getDataWithSearch = async (req, res) => {
+    const getDataWithSearch = async (req, res) => {
+      const { search, category } = req.query;
+  
+      try {
+          // Base product query
+          let productQuery = `
+              SELECT p.id, p.name, p.price, p.description, p.picture_path 
+              FROM products p
+              WHERE 1=1
+          `;
+          const queryParams = [];
+  
+          // Handle category filter
+          if (category) {
+              productQuery += `
+                  AND p.category_id = (
+                      SELECT id FROM categories WHERE name = $${queryParams.length + 1}
+                  )
+              `;
+              queryParams.push(category);
+          }
+  
+          // Handle search filter
+          if (search) {
+              productQuery += `
+                  AND LOWER(p.name) LIKE LOWER($${queryParams.length + 1})
+              `;
+              queryParams.push(`%${search}%`);
+          }
+  
+          productQuery += `
+              ORDER BY p.id
+          `;
+  
+          // Execute the query
+          const productResult = await req.pool.query(productQuery, queryParams);
+          const products = productResult.rows.map(product => ({
+              id: product.id,
+              name: product.name,
+              price: product.price,
+              description: product.description,
+              image_url: cloudinary.url(product.picture_path), // Adjust based on your setup
+              location: product.location, // Add if location is fetched from the database
+          }));
+  
+          res.json({ products });
+      } catch (error) {
+          console.error('Error fetching products with search and category:', error);
+          res.status(500).json({ message: 'Internal server error' });
+      }
+  };
+  
+}
+  };
   
 
 module.exports = {
     postProduct,
     getAllProductData,
+    getDataWithSearch,
     upload
 };
