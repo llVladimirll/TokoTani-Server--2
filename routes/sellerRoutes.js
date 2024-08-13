@@ -2,15 +2,17 @@ const express = require('express');
 const router = express.Router();
 const sellerController = require('../controller/sellerController');
 
+// POST endpoint to handle seller profile creation/updating
+router.post('/:userId', sellerController.upload.single('sellerImage'), (req, res) => {
+  sellerController.postSeller(req, res, req.pool);
+});
+
 // GET endpoint to fetch product details for editing
 router.get('/product/:productId', (req, res) => {
   sellerController.getProductForEdit(req, res, req.pool);
 });
 
-// POST endpoint to handle seller profile creation/updating
-router.post('/:userId', sellerController.upload.single('sellerImage'), (req, res) => {
-  sellerController.postSeller(req, res, req.pool);
-});
+
 
 // GET endpoint to fetch products by seller ID
 router.get('/products/:sellerId', (req, res) => {

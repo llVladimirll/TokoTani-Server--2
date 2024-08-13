@@ -59,19 +59,24 @@ const postSeller = async (req, res, pool) => {
 
 
 const getOrder = async (req, res, pool) => {
-  const { sellerId } = req.params; // Assuming sellerId is passed in req.params or req.query
-  
+  const { sellerId } = req.params; // Assuming sellerId is passed in req.params
+
+  // Log the sellerId to verify it's being received correctly
+  console.log('Received sellerId:', sellerId);
+
   try {
     const client = await pool.connect();
+
+    // Check the sellerId in the products table
     const result = await client.query(`
       SELECT 
         o.id as order_id, 
         o.status, 
         o.created_at, 
         o.user_id,
-        u.name as user_name,    -- Join users table to get user_name
+        u.name as user_name,    
         a.address_line1,
-        a.address_line2,        -- Address line from addresses table
+        a.address_line2,        
         a.city,
         a.postal_code,
         a.province,
@@ -85,21 +90,26 @@ const getOrder = async (req, res, pool) => {
         )) as order_items
       FROM orders o
       JOIN order_items oi ON o.id = oi.order_id
-      JOIN products p ON oi.product_id = p.id
-      JOIN users u ON o.user_id = u.id    -- Join with users table
-      JOIN addresses a ON o.address_id = a.id  -- Join with addresses table using address_id from orders
+      JOIN products p ON oi.product_id = p.id AND p.seller_id = $1
+      JOIN users u ON o.user_id = u.id
+      JOIN addresses a ON o.address_id = a.id
       WHERE p.seller_id = $1
       GROUP BY o.id, o.status, o.created_at, o.user_id, u.name, a.address_line1, a.address_line2, a.city, a.province, a.postal_code, a.country
       ORDER BY o.created_at DESC
     `, [sellerId]);
-      
+
     client.release();
+
+    // Log the result to verify the returned rows
+    console.log('Query result:', result.rows);
+
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching orders', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 };
+
 
 
 
